@@ -1,0 +1,135 @@
+<!-- public/download.html -->
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Secure Transfer — Verify</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <canvas id="bgCanvas"></canvas>
+
+  <div class="wrapper">
+    <div class="card">
+      <div class="header">
+        <div>
+          <div class="brand typing">VERIFY DOWNLOAD</div>
+          <div class="subtitle">Masukkan OTP untuk membuka unduhan</div>
+        </div>
+        <div class="footer">Mode: <strong style="color:var(--neon)">HACKER</strong></div>
+      </div>
+
+      <div class="form" id="mainForm">
+        <div id="requestStage" class="field">
+          <p>Token: <code id="tokenText" style="color:var(--neon)"></code></p>
+          <button id="requestOtpBtn" class="btn primary">Minta Kode OTP</button>
+          <div id="reqMsg" class="status"></div>
+        </div>
+
+        <div id="verifyStage" class="field hidden">
+          <label class="field-label">Masukkan Kode OTP (6 digit)</label>
+          <input id="otpInput" class="input" type="text" maxlength="6" placeholder="123456">
+          <div class="actions">
+            <button id="verifyBtn" class="btn primary">Verifikasi</button>
+            <button id="resendBtn" type="button" class="btn ghost">Minta Ulang</button>
+          </div>
+          <div id="verifyMsg" class="status"></div>
+        </div>
+
+        <div id="doneStage" class="field hidden">
+          <h3 style="color:var(--neon)">Verifikasi Berhasil</h3>
+          <p id="fileName" style="color:var(--muted)"></p>
+          <a id="downloadBtn" class="btn primary" target="_blank">Unduh File</a>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+<script>
+/* background canvas same as sender */
+(function(){
+  const c = document.getElementById('bgCanvas'), ctx = c.getContext('2d');
+  let w = c.width = innerWidth, h = c.height = innerHeight;
+  const cols = Math.floor(w / 14);
+  const drops = Array(cols).fill(0);
+  function resize(){ w=c.width=innerWidth; h=c.height=innerHeight; }
+  addEventListener('resize', resize);
+  function draw(){
+    ctx.fillStyle='rgba(0,0,0,0.05)'; ctx.fillRect(0,0,w,h);
+    ctx.fillStyle='rgba(0,255,136,0.12)'; ctx.font='12px monospace';
+    for(let i=0;i<drops.length;i++){
+      const x = i*14, y = drops[i]*14;
+      ctx.fillText(String.fromCharCode(33+Math.random()*94|0), x, y);
+      if(y>h || Math.random()>0.98) drops[i]=0; else drops[i]++;
+    }
+    requestAnimationFrame(draw);
+  }
+  draw();
+})();
+
+/* logic */
+const token = window.location.pathname.split('/').pop();
+document.getElementById('tokenText').textContent = token || '(tidak ditemukan)';
+const requestOtpBtn = document.getElementById('requestOtpBtn');
+const reqMsg = document.getElementById('reqMsg');
+const verifyStage = document.getElementById('verifyStage');
+const verifyBtn = document.getElementById('verifyBtn');
+const otpInput = document.getElementById('otpInput');
+const verifyMsg = document.getElementById('verifyMsg');
+const doneStage = document.getElementById('doneStage');
+const fileNameEl = document.getElementById('fileName');
+const downloadBtn = document.getElementById('downloadBtn');
+const resendBtn = document.getElementById('resendBtn');
+
+function show(el, v=true){ el.classList.toggle('hidden', !v); }
+function showStatus(el, msg, ok=true){ el.textContent = msg; el.className = 'status ' + (ok? 'ok':'err'); }
+
+requestOtpBtn.addEventListener('click', async () => {
+  requestOtpBtn.disabled = true;
+  showStatus(reqMsg, 'Mengirim permintaan OTP...');
+  try {
+    const res = await fetch('/api/otp/request', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ token })
+    });
+    const data = await res.json();
+    if(!res.ok) throw new Error(data.message || 'Gagal minta OTP');
+    showStatus(reqMsg, data.message);
+    show(verifyStage,true);
+  } catch(err) {
+    console.error(err);
+    showStatus(reqMsg, 'Gagal minta OTP: ' + (err.message || ''), false);
+  } finally { requestOtpBtn.disabled = false; }
+});
+
+verifyBtn.addEventListener('click', async () => {
+  const otp = otpInput.value.trim();
+  if(!otp){ showStatus(verifyMsg, 'Masukkan kode OTP', false); return; }
+  verifyBtn.disabled = true; showStatus(verifyMsg, 'Memverifikasi...');
+  try {
+    const res = await fetch('/api/otp/verify', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ token, otp })
+    });
+    const data = await res.json();
+    if(!res.ok) throw new Error(data.message || 'Verifikasi gagal');
+    showStatus(verifyMsg, data.message);
+    // tampilkan tombol unduh
+    fileNameEl.textContent = 'Nama file: ' + (data.fileName || 'unknown');
+    downloadBtn.href = data.downloadUrl || (`/api/download-file/${token}`);
+    show(doneStage, true);
+    show(verifyStage, false);
+  } catch(err){
+    console.error(err);
+    showStatus(verifyMsg, 'Verifikasi gagal: ' + (err.message || ''), false);
+  } finally { verifyBtn.disabled = false; }
+});
+
+resendBtn.addEventListener('click', ()=> requestOtpBtn.click());
+</script>
+</body>
+</html>

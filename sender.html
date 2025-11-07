@@ -1,0 +1,160 @@
+<!-- public/sender.html -->
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Secure Transfer — Sender</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <canvas id="bgCanvas"></canvas>
+
+  <div class="wrapper">
+    <div class="card">
+      <div class="header">
+        <div>
+          <div class="brand typing">SECURE TRANSFER</div>
+          <div class="subtitle">Upload → Kirim Tautan Aman → Verifikasi OTP</div>
+        </div>
+        <div class="footer">Mode: <strong style="color:var(--neon)">HACKER</strong></div>
+      </div>
+
+      <form id="uploadForm" class="form" enctype="multipart/form-data">
+        <div class="field">
+          <label class="field-label">Pilih file</label>
+          <input id="fileInput" class="input" type="file" name="file" required>
+        </div>
+
+        <div class="row">
+          <div class="col">
+            <label class="field-label">Email Pengirim</label>
+            <input id="senderEmail" name="senderEmail" class="input" type="email" placeholder="you@domain.com" required>
+          </div>
+          <div class="col">
+            <label class="field-label">Email Penerima</label>
+            <input id="recipientEmail" name="recipientEmail" class="input" type="email" placeholder="recipient@domain.com" required>
+          </div>
+        </div>
+
+        <div class="actions">
+          <button id="sendBtn" class="btn primary" type="submit">Kirim Aman</button>
+          <button id="resetBtn" type="button" class="btn ghost">Reset</button>
+        </div>
+
+        <div id="progressWrap" class="progress-wrap hidden">
+          <div id="progressBar" class="progress-bar"></div>
+        </div>
+
+        <div id="status" class="status"></div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal template -->
+  <div id="modalWrap" class="hidden"></div>
+
+<script>
+/* background matrix-canvas (subtle) */
+(function(){
+  const c = document.getElementById('bgCanvas'), ctx = c.getContext('2d');
+  let w = c.width = innerWidth, h = c.height = innerHeight;
+  const cols = Math.floor(w / 14);
+  const drops = Array(cols).fill(0);
+  function resize(){ w=c.width=innerWidth; h=c.height=innerHeight; }
+  addEventListener('resize', resize);
+  function draw(){
+    ctx.fillStyle='rgba(0,0,0,0.05)'; ctx.fillRect(0,0,w,h);
+    ctx.fillStyle='rgba(0,255,136,0.12)'; ctx.font='12px monospace';
+    for(let i=0;i<drops.length;i++){
+      const x = i*14, y = drops[i]*14;
+      ctx.fillText(String.fromCharCode(33+Math.random()*94|0), x, y);
+      if(y>h || Math.random()>0.98) drops[i]=0; else drops[i]++;
+    }
+    requestAnimationFrame(draw);
+  }
+  draw();
+})();
+
+/* main: upload and UI logic */
+const uploadForm = document.getElementById('uploadForm');
+const fileInput = document.getElementById('fileInput');
+const senderEmail = document.getElementById('senderEmail');
+const recipientEmail = document.getElementById('recipientEmail');
+const progressWrap = document.getElementById('progressWrap');
+const progressBar = document.getElementById('progressBar');
+const statusEl = document.getElementById('status');
+const sendBtn = document.getElementById('sendBtn');
+const resetBtn = document.getElementById('resetBtn');
+const modalWrap = document.getElementById('modalWrap');
+
+function showStatus(msg, ok=true){ statusEl.textContent = msg; statusEl.className = 'status ' + (ok? 'ok':'err'); }
+function showProgress(p){ progressWrap.classList.remove('hidden'); progressBar.style.width = p + '%'; }
+function hideProgress(){ progressWrap.classList.add('hidden'); progressBar.style.width = '0%'; }
+
+resetBtn.addEventListener('click', ()=>{ uploadForm.reset(); hideProgress(); showStatus(''); });
+
+uploadForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  if(!fileInput.files.length) return showStatus('Pilih file terlebih dahulu', false);
+  const fd = new FormData();
+  fd.append('file', fileInput.files[0]);
+  fd.append('senderEmail', senderEmail.value);
+  fd.append('recipientEmail', recipientEmail.value);
+
+  sendBtn.disabled = true;
+  showStatus('Menyiapkan unggahan...');
+  showProgress(6);
+
+  try {
+    const resp = await fetch('/api/upload', { method: 'POST', body: fd });
+    const text = await resp.text(); // server saat ini mengirim text
+    if(!resp.ok) throw new Error(text || 'Gagal mengunggah');
+
+    showProgress(100);
+    showStatus('Tautan berhasil dikirim ke email penerima.');
+
+    // Coba cari tautan /download/<token> di response text
+    const linkMatch = text.match(/https?:\/\/[^\\s"]*\/download\/([a-zA-Z0-9-]+)/);
+    let token = null, link = null;
+    if(linkMatch){ link = linkMatch[0]; token = linkMatch[1]; }
+
+    // show modal with message (tautan atau response text)
+    const modalHtml = document.createElement('div');
+    modalHtml.className = 'modal-backdrop';
+    modalHtml.innerHTML = `
+      <div class="modal">
+        <h3 style="color:var(--neon); margin:0 0 8px 0">Tautan Terkirim</h3>
+        <div class="code">${ link ? `<a href="${link}" target="_blank">${link}</a>` : ('<pre>'+escapeHtml(text)+'</pre>') }</div>
+        <div style="margin-top:12px; display:flex; gap:8px; justify-content:flex-end">
+          ${ link ? `<button id="openBtn" class="btn primary">Buka Tautan</button>` : '' }
+          <button id="copyBtn" class="btn">Salin Pesan</button>
+          <button id="closeBtn" class="btn ghost">Tutup</button>
+        </div>
+      </div>
+    `;
+    modalWrap.innerHTML=''; modalWrap.classList.remove('hidden'); modalWrap.appendChild(modalHtml);
+
+    if(link){
+      modalHtml.querySelector('#openBtn').addEventListener('click', ()=> window.open(link, '_blank'));
+    }
+    modalHtml.querySelector('#copyBtn').addEventListener('click', ()=>{
+      navigator.clipboard.writeText(link || text).then(()=> showStatus('Teks disalin ke clipboard.'));
+    });
+    modalHtml.querySelector('#closeBtn').addEventListener('click', ()=>{ modalWrap.innerHTML=''; modalWrap.classList.add('hidden'); });
+
+  } catch (err) {
+    console.error(err);
+    showStatus('Gagal mengunggah: ' + (err.message || err), false);
+    showProgress(0);
+    setTimeout(()=> hideProgress(), 800);
+  } finally {
+    sendBtn.disabled = false;
+  }
+});
+
+/* small util */
+function escapeHtml(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+</script>
+</body>
+</html>
